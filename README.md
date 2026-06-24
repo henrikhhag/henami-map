@@ -1,4 +1,4 @@
-# henam-map
+# henami-map
 
 Open source WebGL map library, heavily inspired by Mapbox GL JS. Built from scratch with no dependencies — just vanilla JavaScript and the Canvas 2D API.
 
@@ -18,7 +18,7 @@ Then open [http://localhost:3030](http://localhost:3030).
 ## Usage
 
 ```js
-import { Map, Marker } from 'henam-map'
+import { Map, Marker } from 'henami-map'
 
 const map = new Map('map-container', {
   center: { lng: 10.75, lat: 59.91 },
@@ -88,7 +88,7 @@ src/
 
 ## Tile sources
 
-By default, henam-map uses [OpenStreetMap](https://www.openstreetmap.org/) tiles (free, no API key required). You can swap in any XYZ tile source:
+By default, henami-map uses [OpenStreetMap](https://www.openstreetmap.org/) tiles (free, no API key required). You can swap in any XYZ tile source:
 
 ```js
 const map = new Map('container', {
@@ -103,7 +103,7 @@ Please follow the [OSM tile usage policy](https://operations.osmfoundation.org/p
 - [x] Phase 1 — Raster tiles, pan/zoom, markers, flyTo
 - [ ] Phase 2 — Vector tile parsing (PBF/protobuf), WebGL renderer
 - [ ] Phase 3 — Style spec (JSON layers), line/polygon drawing
-- [ ] Phase 4 — React wrapper (`<HenamMap />`)
+- [ ] Phase 4 — React wrapper (`<HenamiMap />`)
 - [ ] Phase 5 — Custom themes / dark mode tiles
 
 ## License
