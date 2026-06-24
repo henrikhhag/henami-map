@@ -2,37 +2,88 @@ import { createSphere } from '../geo/sphere.js'
 import { perspective, rotateX, rotateY, translate, multiply } from '../geo/mat4.js'
 import { TileStitcher } from '../tiles/TileStitcher.js'
 
-const VERT = `
+// ── Globe ────────────────────────────────────────────────────────────────────
+
+const GLOBE_VERT = `
 attribute vec3 a_pos;
 attribute vec2 a_uv;
 uniform mat4 u_mvp;
+uniform mat4 u_mv;
 varying vec2 v_uv;
-varying vec3 v_normal;
+varying vec3 v_eye_normal;
 void main() {
   gl_Position = u_mvp * vec4(a_pos, 1.0);
   v_uv = a_uv;
-  v_normal = a_pos;
+  v_eye_normal = mat3(u_mv) * a_pos;
 }
 `
 
-const FRAG = `
+const GLOBE_FRAG = `
 precision mediump float;
 uniform sampler2D u_tex;
-uniform vec3 u_light;
 varying vec2 v_uv;
-varying vec3 v_normal;
+varying vec3 v_eye_normal;
 void main() {
   vec4 color = texture2D(u_tex, v_uv);
-  vec3 n = normalize(v_normal);
-  vec3 l = normalize(u_light);
-  float diffuse = max(0.25, dot(n, l));
-  float rim = 1.0 - max(0.0, dot(n, vec3(0.0, 0.0, 1.0)));
-  vec3 atmo = vec3(0.3, 0.5, 1.0) * pow(rim, 3.0) * 0.4;
-  gl_FragColor = vec4(color.rgb * diffuse + atmo, color.a);
+  vec3 light = normalize(vec3(0.6, 0.4, 1.0));
+  float diffuse = max(0.22, dot(normalize(v_eye_normal), light));
+  gl_FragColor = vec4(color.rgb * diffuse, color.a);
 }
 `
 
-function compileShader(gl, type, src) {
+// ── Atmosphere ───────────────────────────────────────────────────────────────
+
+const ATMO_VERT = `
+attribute vec3 a_pos;
+uniform mat4 u_mvp;
+uniform mat4 u_mv;
+varying float v_rim;
+void main() {
+  gl_Position = u_mvp * vec4(a_pos * 1.055, 1.0);
+  vec3 eye = normalize(mat3(u_mv) * a_pos);
+  v_rim = 1.0 - abs(eye.z);
+}
+`
+
+const ATMO_FRAG = `
+precision mediump float;
+varying float v_rim;
+void main() {
+  float inner = pow(v_rim, 2.0) * 0.6;
+  float outer = pow(v_rim, 5.0) * 0.95;
+  float a = inner + outer;
+  vec3 color = mix(vec3(0.4, 0.65, 1.0), vec3(0.15, 0.45, 1.0), outer);
+  gl_FragColor = vec4(color, a);
+}
+`
+
+// ── Stars ────────────────────────────────────────────────────────────────────
+
+const STAR_VERT = `
+attribute vec2 a_pos;
+attribute float a_bright;
+varying float v_bright;
+void main() {
+  gl_Position = vec4(a_pos, 0.999, 1.0);
+  gl_PointSize = a_bright * 2.2 + 0.8;
+  v_bright = a_bright;
+}
+`
+
+const STAR_FRAG = `
+precision mediump float;
+varying float v_bright;
+void main() {
+  float d = length(gl_PointCoord - 0.5) * 2.0;
+  if (d > 1.0) discard;
+  float a = (1.0 - d * d) * v_bright;
+  gl_FragColor = vec4(0.88, 0.93, 1.0, a);
+}
+`
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function compile(gl, type, src) {
   const s = gl.createShader(type)
   gl.shaderSource(s, src)
   gl.compileShader(s)
@@ -41,14 +92,38 @@ function compileShader(gl, type, src) {
   return s
 }
 
+function program(gl, vert, frag) {
+  const p = gl.createProgram()
+  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vert))
+  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, frag))
+  gl.linkProgram(p)
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(p))
+  return p
+}
+
 function placeholder() {
   const c = document.createElement('canvas')
   c.width = c.height = 2
   const ctx = c.getContext('2d')
-  ctx.fillStyle = '#3a7ab5'
+  ctx.fillStyle = '#1a6394'
   ctx.fillRect(0, 0, 2, 2)
   return c
 }
+
+function generateStars(count = 2500) {
+  const pos = [], bright = []
+  for (let i = 0; i < count; i++) {
+    // Avoid center (globe area) — sparse in middle, dense at edges
+    let x, y
+    do { x = Math.random() * 2 - 1; y = Math.random() * 2 - 1 } while (Math.random() < 0.3 && x * x + y * y < 0.25)
+    pos.push(x, y)
+    bright.push(Math.pow(Math.random(), 0.5))
+  }
+  return { pos: new Float32Array(pos), bright: new Float32Array(bright), count }
+}
+
+// ── GlobeRenderer ────────────────────────────────────────────────────────────
 
 export class GlobeRenderer {
   constructor(canvas, camera, tileLoader) {
@@ -63,61 +138,87 @@ export class GlobeRenderer {
     if (!gl) throw new Error('WebGL ikke støttet')
     this.gl = gl
 
-    this._setupProgram()
-    this._setupGeometry()
+    this._setupGlobe()
+    this._setupAtmo()
+    this._setupStars()
 
-    gl.enable(gl.DEPTH_TEST)
-    gl.enable(gl.CULL_FACE)
-    gl.cullFace(gl.BACK)
-    gl.clearColor(0.02, 0.02, 0.06, 1)
+    gl.clearColor(0.015, 0.015, 0.04, 1)
 
     this._setTexture(placeholder())
     this._loadTiles(2)
   }
 
-  _setupProgram() {
+  _setupGlobe() {
     const gl = this.gl
-    const prog = gl.createProgram()
-    gl.attachShader(prog, compileShader(gl, gl.VERTEX_SHADER, VERT))
-    gl.attachShader(prog, compileShader(gl, gl.FRAGMENT_SHADER, FRAG))
-    gl.linkProgram(prog)
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
-      throw new Error(gl.getProgramInfoLog(prog))
-    this.prog = prog
-    this.locs = {
-      aPos: gl.getAttribLocation(prog, 'a_pos'),
-      aUv: gl.getAttribLocation(prog, 'a_uv'),
-      uMvp: gl.getUniformLocation(prog, 'u_mvp'),
-      uTex: gl.getUniformLocation(prog, 'u_tex'),
-      uLight: gl.getUniformLocation(prog, 'u_light'),
+    const prog = program(gl, GLOBE_VERT, GLOBE_FRAG)
+    const { positions, uvs, indices } = createSphere(72, 144)
+
+    const posBuf = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf)
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW)
+
+    const uvBuf = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf)
+    gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.STATIC_DRAW)
+
+    const idxBuf = gl.createBuffer()
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf)
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW)
+
+    this._globe = {
+      prog, posBuf, uvBuf, idxBuf, count: indices.length,
+      locs: {
+        aPos: gl.getAttribLocation(prog, 'a_pos'),
+        aUv:  gl.getAttribLocation(prog, 'a_uv'),
+        uMvp: gl.getUniformLocation(prog, 'u_mvp'),
+        uMv:  gl.getUniformLocation(prog, 'u_mv'),
+        uTex: gl.getUniformLocation(prog, 'u_tex'),
+      }
     }
   }
 
-  _setupGeometry() {
+  _setupAtmo() {
     const gl = this.gl
-    const { positions, uvs, indices } = createSphere(64, 128)
-
-    this.posBuf = gl.createBuffer()
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuf)
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW)
-
-    this.uvBuf = gl.createBuffer()
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuf)
-    gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.STATIC_DRAW)
-
-    this.idxBuf = gl.createBuffer()
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.idxBuf)
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW)
-
-    this.indexCount = indices.length
+    const prog = program(gl, ATMO_VERT, ATMO_FRAG)
+    const g = this._globe
+    this._atmo = {
+      prog,
+      locs: {
+        aPos: gl.getAttribLocation(prog, 'a_pos'),
+        uMvp: gl.getUniformLocation(prog, 'u_mvp'),
+        uMv:  gl.getUniformLocation(prog, 'u_mv'),
+      }
+    }
   }
 
-  _setTexture(imgOrCanvas) {
+  _setupStars() {
+    const gl = this.gl
+    const prog = program(gl, STAR_VERT, STAR_FRAG)
+    const { pos, bright, count } = generateStars(2500)
+
+    const posBuf = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf)
+    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW)
+
+    const brightBuf = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, brightBuf)
+    gl.bufferData(gl.ARRAY_BUFFER, bright, gl.STATIC_DRAW)
+
+    this._stars = {
+      prog, posBuf, brightBuf, count,
+      locs: {
+        aPos:    gl.getAttribLocation(prog, 'a_pos'),
+        aBright: gl.getAttribLocation(prog, 'a_bright'),
+      }
+    }
+  }
+
+  _setTexture(src) {
     const gl = this.gl
     if (this._texture) gl.deleteTexture(this._texture)
     const tex = gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, tex)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgOrCanvas)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src)
     gl.generateMipmap(gl.TEXTURE_2D)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
@@ -130,11 +231,11 @@ export class GlobeRenderer {
   _loadTiles(zoom) {
     this.stitcher.stitch(zoom, (canvas) => {
       this._setTexture(canvas)
-      if (zoom < 3) setTimeout(() => this._loadTiles(3), 500)
+      if (zoom < 3) setTimeout(() => this._loadTiles(zoom + 1), 800)
     })
   }
 
-  _getMVP() {
+  _matrices() {
     const { canvas, camera } = this
     const w = canvas.clientWidth || 1
     const h = canvas.clientHeight || 1
@@ -144,7 +245,9 @@ export class GlobeRenderer {
     const proj = perspective(40 * Math.PI / 180, w / h, 0.1, 10)
     const view = translate(0, 0, -dist)
     const model = multiply(rotateX(-lat), rotateY(-lng))
-    return multiply(proj, multiply(view, model))
+    const mv = multiply(view, model)
+    const mvp = multiply(proj, mv)
+    return { mvp, mv }
   }
 
   _resize() {
@@ -166,30 +269,62 @@ export class GlobeRenderer {
     this._dirty = false
 
     const gl = this.gl
-    const { locs } = this
-
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+
+    const { mvp, mv } = this._matrices()
+
+    // ── Stars (depth test off, alpha blend) ──────────────────────────────
+    gl.disable(gl.DEPTH_TEST)
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
+    const st = this._stars
+    gl.useProgram(st.prog)
+    gl.bindBuffer(gl.ARRAY_BUFFER, st.posBuf)
+    gl.enableVertexAttribArray(st.locs.aPos)
+    gl.vertexAttribPointer(st.locs.aPos, 2, gl.FLOAT, false, 0, 0)
+    gl.bindBuffer(gl.ARRAY_BUFFER, st.brightBuf)
+    gl.enableVertexAttribArray(st.locs.aBright)
+    gl.vertexAttribPointer(st.locs.aBright, 1, gl.FLOAT, false, 0, 0)
+    gl.drawArrays(gl.POINTS, 0, st.count)
+
+    // ── Globe (depth test on, no blend) ──────────────────────────────────
+    gl.enable(gl.DEPTH_TEST)
+    gl.disable(gl.BLEND)
+    gl.enable(gl.CULL_FACE)
+    gl.cullFace(gl.BACK)
     if (!this._texture) return
-
-    gl.useProgram(this.prog)
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuf)
-    gl.enableVertexAttribArray(locs.aPos)
-    gl.vertexAttribPointer(locs.aPos, 3, gl.FLOAT, false, 0, 0)
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuf)
-    gl.enableVertexAttribArray(locs.aUv)
-    gl.vertexAttribPointer(locs.aUv, 2, gl.FLOAT, false, 0, 0)
-
-    gl.uniformMatrix4fv(locs.uMvp, false, this._getMVP())
-    gl.uniform1i(locs.uTex, 0)
-    gl.uniform3f(locs.uLight, 1.2, 0.8, 1.5)
-
+    const gb = this._globe
+    gl.useProgram(gb.prog)
+    gl.bindBuffer(gl.ARRAY_BUFFER, gb.posBuf)
+    gl.enableVertexAttribArray(gb.locs.aPos)
+    gl.vertexAttribPointer(gb.locs.aPos, 3, gl.FLOAT, false, 0, 0)
+    gl.bindBuffer(gl.ARRAY_BUFFER, gb.uvBuf)
+    gl.enableVertexAttribArray(gb.locs.aUv)
+    gl.vertexAttribPointer(gb.locs.aUv, 2, gl.FLOAT, false, 0, 0)
+    gl.uniformMatrix4fv(gb.locs.uMvp, false, mvp)
+    gl.uniformMatrix4fv(gb.locs.uMv, false, mv)
+    gl.uniform1i(gb.locs.uTex, 0)
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this._texture)
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gb.idxBuf)
+    gl.drawElements(gl.TRIANGLES, gb.count, gl.UNSIGNED_SHORT, 0)
 
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.idxBuf)
-    gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0)
+    // ── Atmosphere (depth test off, alpha blend) ──────────────────────────
+    gl.disable(gl.DEPTH_TEST)
+    gl.disable(gl.CULL_FACE)
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+    const at = this._atmo
+    gl.useProgram(at.prog)
+    gl.bindBuffer(gl.ARRAY_BUFFER, gb.posBuf)
+    gl.enableVertexAttribArray(at.locs.aPos)
+    gl.vertexAttribPointer(at.locs.aPos, 3, gl.FLOAT, false, 0, 0)
+    gl.uniformMatrix4fv(at.locs.uMvp, false, mvp)
+    gl.uniformMatrix4fv(at.locs.uMv, false, mv)
+    gl.drawElements(gl.TRIANGLES, gb.count, gl.UNSIGNED_SHORT, 0)
+
+    gl.disable(gl.BLEND)
+    gl.enable(gl.DEPTH_TEST)
   }
 
   start() {
