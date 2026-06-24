@@ -3,41 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>henam-map demo</title>
+  <title>henami-map demo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: sans-serif; background: #111; color: #fff; height: 100vh; display: flex; flex-direction: column; }
-    header { padding: 12px 20px; background: #1a1a1a; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 16px; }
-    header h1 { font-size: 18px; letter-spacing: -0.5px; }
-    header span { font-size: 12px; color: #888; }
+    body { font-family: sans-serif; background: #0a0a0f; color: #fff; height: 100vh; display: flex; flex-direction: column; }
+    header { padding: 12px 20px; background: #111118; border-bottom: 1px solid #222; display: flex; align-items: center; gap: 14px; z-index: 10; }
+    header h1 { font-size: 17px; letter-spacing: -0.5px; font-weight: 600; }
+    .badge { font-size: 11px; background: #1e3a5f; color: #7bb8f0; padding: 2px 8px; border-radius: 999px; }
     #map { flex: 1; }
     #controls {
       position: fixed; bottom: 24px; right: 16px;
-      display: flex; flex-direction: column; gap: 6px;
+      display: flex; flex-direction: column; gap: 6px; z-index: 10;
     }
     button {
-      background: #222; border: 1px solid #444; color: #fff;
-      padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
+      background: #16161e; border: 1px solid #333; color: #ddd;
+      padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+      transition: background 0.15s;
     }
-    button:hover { background: #333; }
+    button:hover { background: #222230; }
     #info {
       position: fixed; bottom: 24px; left: 16px;
-      background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 8px;
-      font-size: 12px; color: #aaa; font-family: monospace;
+      background: rgba(0,0,0,0.65); padding: 7px 12px; border-radius: 8px;
+      font-size: 12px; color: #aaa; font-family: monospace; z-index: 10;
+    }
+    #mode {
+      position: fixed; top: 60px; left: 16px;
+      background: rgba(0,0,0,0.55); padding: 5px 10px; border-radius: 6px;
+      font-size: 11px; color: #7bb8f0; z-index: 10; letter-spacing: 0.5px;
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>henam-map</h1>
-    <span>v0.1.0 — open source WebGL map library</span>
+    <h1>henami-map</h1>
+    <span class="badge">v0.1.0</span>
+    <span style="color:#555;font-size:12px">open source WebGL map library</span>
   </header>
   <div id="map"></div>
+  <div id="mode">GLOBE</div>
   <div id="info">lat: — lng: — zoom: —</div>
   <div id="controls">
+    <button id="btn-world">Verden</button>
     <button id="btn-oslo">Oslo</button>
     <button id="btn-bergen">Bergen</button>
-    <button id="btn-world">Verden</button>
+    <button id="btn-new-york">New York</button>
     <button id="btn-zoom-in">+</button>
     <button id="btn-zoom-out">−</button>
   </div>
@@ -46,27 +55,34 @@
     import { Map } from '../src/index.js'
 
     const map = new Map('map', {
-      center: { lng: 10.75, lat: 59.91 },
-      zoom: 11
+      center: { lng: 15, lat: 25 },
+      zoom: 1.5
     })
 
-    map.addMarker({ lng: 10.75, lat: 59.91, color: '#3b82f6', label: 'Oslo' })
-    map.addMarker({ lng: 5.32, lat: 60.39, color: '#10b981', label: 'Bergen' })
+    map.addMarker({ lng: 10.75, lat: 59.91, color: '#3b82f6', label: 'O' })
+    map.addMarker({ lng: 5.32,  lat: 60.39, color: '#10b981', label: 'B' })
+    map.addMarker({ lng: -74.0, lat: 40.71, color: '#f59e0b', label: 'N' })
 
     const info = document.getElementById('info')
+    const modeEl = document.getElementById('mode')
     setInterval(() => {
       const c = map.getCenter()
-      info.textContent = `lat: ${c.lat.toFixed(4)}  lng: ${c.lng.toFixed(4)}  zoom: ${map.getZoom().toFixed(2)}`
+      const z = map.getZoom()
+      info.textContent = `lat: ${c.lat.toFixed(3)}  lng: ${c.lng.toFixed(3)}  zoom: ${z.toFixed(2)}`
+      modeEl.textContent = z < 3.5 ? 'GLOBE' : 'KART'
     }, 100)
 
+    document.getElementById('btn-world').onclick = () =>
+      map.flyTo({ center: { lng: 15, lat: 25 }, zoom: 1.5 }, 900)
+
     document.getElementById('btn-oslo').onclick = () =>
-      map.flyTo({ center: { lng: 10.75, lat: 59.91 }, zoom: 12 })
+      map.flyTo({ center: { lng: 10.75, lat: 59.91 }, zoom: 11 }, 1200)
 
     document.getElementById('btn-bergen').onclick = () =>
-      map.flyTo({ center: { lng: 5.32, lat: 60.39 }, zoom: 12 })
+      map.flyTo({ center: { lng: 5.32, lat: 60.39 }, zoom: 11 }, 1200)
 
-    document.getElementById('btn-world').onclick = () =>
-      map.flyTo({ center: { lng: 15, lat: 20 }, zoom: 2 })
+    document.getElementById('btn-new-york').onclick = () =>
+      map.flyTo({ center: { lng: -74.0, lat: 40.71 }, zoom: 11 }, 1200)
 
     document.getElementById('btn-zoom-in').onclick = () =>
       map.setZoom(map.getZoom() + 1)
