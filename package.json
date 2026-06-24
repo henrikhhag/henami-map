@@ -1,0 +1,26 @@
+{
+  "name": "henami-map",
+  "version": "0.1.0",
+  "description": "Open source WebGL map library, inspired by Mapbox GL JS",
+  "main": "dist/henami-map.js",
+  "module": "dist/henami-map.esm.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:lib": "vite build --config vite.lib.config.js",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .js,.ts"
+  },
+  "keywords": ["map", "webgl", "open-source", "mapbox-inspired", "henami"],
+  "author": "henrikhhag",
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "typescript": "^5.3.0",
+    "@types/webgl2": "^0.0.11",
+    "eslint": "^8.57.0"
+  },
+  "dependencies": {}
+}
