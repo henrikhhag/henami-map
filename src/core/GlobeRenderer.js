@@ -248,7 +248,11 @@ export class GlobeRenderer {
   _loadTiles(zoom) {
     this.stitcher.stitch(zoom, (canvas) => {
       this._setTexture(canvas)
-      if (zoom < 3) setTimeout(() => this._loadTiles(zoom + 1), 800)
+      // Oppgrader til skarpere nivå hvis neste tekstur får plass på GPU-en.
+      const nextPx = Math.pow(2, zoom + 1) * 512
+      if (zoom < 3 && nextPx <= this._maxTexSize) {
+        setTimeout(() => this._loadTiles(zoom + 1), 600)
+      }
     })
   }
 
@@ -265,6 +269,60 @@ export class GlobeRenderer {
     const mv = multiply(view, model)
     const mvp = multiply(proj, mv)
     return { mvp, mv }
+  }
+
+  // Vinkelavstand (grader) mellom to geo-punkter.
+  _angularDist(aLng, aLat, bLng, bLat) {
+    const r = Math.PI / 180
+    const dLat = (bLat - aLat) * r, dLng = (bLng - aLng) * r
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLng / 2) ** 2
+    return 2 * Math.asin(Math.min(1, Math.sqrt(a))) * 180 / Math.PI
+  }
+
+  // Projiser geografisk punkt → skjermpiksel. `front` = på synlig halvkule
+  // (innen 90° av senter), avgjort geografisk for å unngå matrise-tvetydighet.
+  projectLngLat(lng, lat) {
+    const { canvas } = this
+    const w = canvas.clientWidth || 1
+    const h = canvas.clientHeight || 1
+    const { mvp } = this._matrices()
+    const latR = lat * Math.PI / 180
+    const lngR = lng * Math.PI / 180
+    const p = [Math.cos(latR) * Math.cos(lngR), Math.sin(latR), Math.cos(latR) * Math.sin(lngR), 1]
+    const c = [0, 0, 0, 0]
+    for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) c[r] += mvp[k * 4 + r] * p[k]
+    if (c[3] <= 0) return null
+    const front = this._angularDist(this.camera.center.lng, this.camera.center.lat, lng, lat) < 90
+    return { x: (c[0] / c[3] * 0.5 + 0.5) * w, y: (1 - (c[1] / c[3] * 0.5 + 0.5)) * h, front }
+  }
+
+  // Skjermpiksel → geografisk punkt på synlig halvkule. Søk via den verifiserte
+  // projectLngLat (unngår invers-matrise-handedness), grov→fin rundt senter.
+  unprojectToLngLat(px, py) {
+    const c = this.camera.center
+    const search = (lng0, lat0, span, n) => {
+      let best = null
+      for (let i = 0; i <= n; i++) {
+        for (let j = 0; j <= n; j++) {
+          const lng = lng0 + (i / n - 0.5) * span
+          const lat = Math.max(-89, Math.min(89, lat0 + (j / n - 0.5) * span))
+          const p = this.projectLngLat(lng, lat)
+          if (!p || !p.front) continue
+          const d = (p.x - px) ** 2 + (p.y - py) ** 2
+          if (!best || d < best.d) best = { lng, lat, d }
+        }
+      }
+      return best
+    }
+    let r = search(c.lng, c.lat, 178, 28)   // grovt over synlig halvkule
+    if (!r) return null
+    r = search(r.lng, r.lat, 14, 18)         // fin
+    r = search(r.lng, r.lat, 1.6, 16)        // finere
+    // utenfor kula hvis nærmeste treff fortsatt er langt unna cursor (> ~6px)
+    if (r.d > 36) return null
+    let lng = ((r.lng + 180) % 360 + 360) % 360 - 180
+    return { lng, lat: r.lat }
   }
 
   _resize() {

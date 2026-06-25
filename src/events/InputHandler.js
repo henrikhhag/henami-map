@@ -4,10 +4,11 @@ import { globeCameraDistance, GLOBE_FOV as FOV } from '../geo/globe.js'
 const GLOBE_THRESHOLD = 3.5
 
 export class InputHandler {
-  constructor(el, camera, onUpdate) {
+  constructor(el, camera, onUpdate, globeRenderer) {
     this.el = el
     this.camera = camera
     this.onUpdate = onUpdate
+    this.globe = globeRenderer
     this._dragging = false
     this._lastX = 0
     this._lastY = 0
@@ -70,9 +71,11 @@ export class InputHandler {
     this._handlers.wheel = (e) => {
       e.preventDefault()
       this._captureZoomAnchor(e)
-      // Akkumulér mot et mål og glid mykt dit – mindre steg = roligere zoom
+      // Skalér med faktisk deltaY (trackpad vs mushjul) men demp kraftig,
+      // og tak per event så raske trackpad-events ikke hoper seg opp.
       const base = this._zoomId ? this._targetZoom : this.camera.zoom
-      const step = -Math.sign(e.deltaY) * 0.35
+      const raw = -e.deltaY * 0.002
+      const step = Math.max(-0.25, Math.min(0.25, raw))
       this._zoomToward(base + step)
     }
 
@@ -130,30 +133,57 @@ export class InputHandler {
     this._inertiaId = requestAnimationFrame(step)
   }
 
+  // Roter globen som ved en drag på (dx, dy) piksler – delt av pan og zoom-anker.
+  _rotateGlobe(dx, dy) {
+    const dpx = this._globeDegPerPixel()
+    const c = this.camera.center
+    c.lng -= dx * dpx
+    c.lat = Math.max(-85, Math.min(85, c.lat + dy * dpx))
+    c.lng = ((c.lng + 180) % 360 + 360) % 360 - 180
+  }
+
   // Fang stedet under cursoren så vi kan holde det fast under zoom (som Mapbox).
-  // Kun i kart-modus; på globen zoomer vi mot senter.
+  // Globe: geografisk punkt via raycast. Kart: verdenspunkt i mercator.
   _captureZoomAnchor(e) {
-    if (this.camera.zoom < GLOBE_THRESHOLD) { this._zoomAnchor = null; return }
+    // Behold ankeret under en pågående zoom-gest (unngår dyrt re-søk på globen)
+    if (this._zoomId && this._zoomAnchor) return
     const rect = this.el.getBoundingClientRect()
     const px = e.clientX - rect.left
     const py = e.clientY - rect.top
-    const w = this.el.clientWidth
-    const h = this.el.clientHeight
-    const cw = lngLatToWorld(this.camera.center.lng, this.camera.center.lat)
-    const world = pixelToWorld(px, py, this.camera.zoom, w, h, cw)
-    this._zoomAnchor = { px, py, world }
+    if (this.camera.zoom < GLOBE_THRESHOLD) {
+      const ll = this.globe ? this.globe.unprojectToLngLat(px, py) : null
+      this._zoomAnchor = ll ? { px, py, globe: ll } : null
+    } else {
+      const w = this.el.clientWidth
+      const h = this.el.clientHeight
+      const cw = lngLatToWorld(this.camera.center.lng, this.camera.center.lat)
+      const world = pixelToWorld(px, py, this.camera.zoom, w, h, cw)
+      this._zoomAnchor = { px, py, world }
+    }
   }
 
-  // Re-sentrér så det forankrede verdenspunktet havner under cursoren igjen.
+  // Hold det forankrede punktet under cursoren etter at zoom har endret seg.
   _applyZoomAnchor() {
-    if (!this._zoomAnchor || this.camera.zoom < GLOBE_THRESHOLD) return
-    const w = this.el.clientWidth
-    const h = this.el.clientHeight
-    const scale = Math.pow(2, this.camera.zoom) * 256
-    const cx = this._zoomAnchor.world.x - (this._zoomAnchor.px - w / 2) / scale
-    const cy = this._zoomAnchor.world.y - (this._zoomAnchor.py - h / 2) / scale
-    const { lng, lat } = worldToLngLat(cx, cy)
-    this.camera.setCenter(lng, Math.max(-85, Math.min(85, lat)))
+    const a = this._zoomAnchor
+    if (!a) return
+    if (this.camera.zoom < GLOBE_THRESHOLD) {
+      if (!a.globe || !this.globe) return
+      // Nudge globen så ankerpunktet projiserer tilbake til cursoren (2 iter.)
+      for (let i = 0; i < 2; i++) {
+        const p = this.globe.projectLngLat(a.globe.lng, a.globe.lat)
+        if (!p) break
+        this._rotateGlobe(a.px - p.x, a.py - p.y)
+      }
+    } else {
+      if (!a.world) return
+      const w = this.el.clientWidth
+      const h = this.el.clientHeight
+      const scale = Math.pow(2, this.camera.zoom) * 256
+      const cx = a.world.x - (a.px - w / 2) / scale
+      const cy = a.world.y - (a.py - h / 2) / scale
+      const { lng, lat } = worldToLngLat(cx, cy)
+      this.camera.setCenter(lng, Math.max(-85, Math.min(85, lat)))
+    }
   }
 
   _zoomToward(target) {
@@ -170,7 +200,7 @@ export class InputHandler {
         return
       }
       // Eksponentiell innfasing → starter raskt, bremser mykt mot målet
-      this.camera.setZoom(cur + diff * 0.15)
+      this.camera.setZoom(cur + diff * 0.1)
       this._applyZoomAnchor()
       this.onUpdate()
       this._zoomId = requestAnimationFrame(ease)
@@ -189,10 +219,7 @@ export class InputHandler {
   _pan(dx, dy) {
     const { camera, el } = this
     if (camera.zoom < GLOBE_THRESHOLD) {
-      const dpx = this._globeDegPerPixel()
-      camera.center.lng -= dx * dpx
-      camera.center.lat = Math.max(-85, Math.min(85, camera.center.lat + dy * dpx))
-      camera.center.lng = ((camera.center.lng + 180) % 360 + 360) % 360 - 180
+      this._rotateGlobe(dx, dy)
     } else {
       const w = el.clientWidth
       const h = el.clientHeight

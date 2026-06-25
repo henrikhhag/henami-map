@@ -5,8 +5,9 @@ import { TileLoader } from '../tiles/TileLoader.js'
 import { InputHandler } from '../events/InputHandler.js'
 import { Marker } from '../ui/Marker.js'
 
-// Mørkt standardkart (CARTO dark, gratis, ingen nøkkel) – Mapbox-aktig mørk globe
-const DARK_URL = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+// Mørkt standardkart (CARTO dark, gratis, ingen nøkkel) – Mapbox-aktig mørk globe.
+// @2x = retina-tiles (512px) → skarpere landetekster, samme antall requests.
+const DARK_URL = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
 const GLOBE_THRESHOLD = 3.9
 // Crossfade-sone: smal og lagt der globe- og kartskala matcher, så overgangen
 // blir en sømløs utflating i stedet for to bilder oppå hverandre.
@@ -38,7 +39,7 @@ export class Map {
     this._globeRenderer = new GlobeRenderer(this._globeCanvas, this._camera, this._tileLoader)
     this._mapRenderer = new Renderer(this._mapCanvas, this._camera, this._tileLoader)
 
-    this._input = new InputHandler(el, this._camera, () => this._onUpdate())
+    this._input = new InputHandler(el, this._camera, () => this._onUpdate(), this._globeRenderer)
     this._events = {}
 
     this._updateMode()
