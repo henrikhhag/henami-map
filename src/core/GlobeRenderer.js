@@ -109,7 +109,7 @@ function placeholder() {
   const c = document.createElement('canvas')
   c.width = c.height = 2
   const ctx = c.getContext('2d')
-  ctx.fillStyle = '#1a6394'
+  ctx.fillStyle = '#0c1320'
   ctx.fillRect(0, 0, 2, 2)
   return c
 }
@@ -256,7 +256,7 @@ export class GlobeRenderer {
     const { canvas, camera } = this
     const w = canvas.clientWidth || 1
     const h = canvas.clientHeight || 1
-    const dist = globeCameraDistance(camera.zoom)
+    const dist = globeCameraDistance(camera.zoom, h)
     const lng = camera.center.lng * Math.PI / 180
     const lat = camera.center.lat * Math.PI / 180
     const proj = perspective(GLOBE_FOV, w / h, 0.1, 10)

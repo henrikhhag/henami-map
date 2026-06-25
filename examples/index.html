@@ -69,7 +69,7 @@
       const c = map.getCenter()
       const z = map.getZoom()
       info.textContent = `lat: ${c.lat.toFixed(3)}  lng: ${c.lng.toFixed(3)}  zoom: ${z.toFixed(2)}`
-      modeEl.textContent = z < 3.5 ? 'GLOBE' : 'KART'
+      modeEl.textContent = z < 3.9 ? 'GLOBE' : 'KART'
     }, 100)
 
     document.getElementById('btn-world').onclick = () =>

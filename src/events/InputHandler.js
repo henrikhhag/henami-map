@@ -15,6 +15,8 @@ export class InputHandler {
     this._velY = 0
     this._lastTime = 0
     this._inertiaId = null
+    this._targetZoom = camera.zoom
+    this._zoomId = null
     this._handlers = {}
     this._attach()
   }
@@ -61,14 +63,15 @@ export class InputHandler {
 
     this._handlers.dblclick = (e) => {
       e.preventDefault()
-      this.camera.flyTo({ zoom: this.camera.zoom + 1 }, 400, this.onUpdate)
+      this._zoomToward((this._zoomId ? this._targetZoom : this.camera.zoom) + 1)
     }
 
     this._handlers.wheel = (e) => {
       e.preventDefault()
-      const delta = e.deltaY > 0 ? -0.3 : 0.3
-      this.camera.setZoom(this.camera.zoom + delta)
-      this.onUpdate()
+      // Akkumulér mot et mål og glid mykt dit – mindre steg = roligere zoom
+      const base = this._zoomId ? this._targetZoom : this.camera.zoom
+      const step = -Math.sign(e.deltaY) * 0.35
+      this._zoomToward(base + step)
     }
 
     this._handlers.touchstart = (e) => {
@@ -125,10 +128,30 @@ export class InputHandler {
     this._inertiaId = requestAnimationFrame(step)
   }
 
+  _zoomToward(target) {
+    this._targetZoom = this.camera.clampZoom(target)
+    if (this._zoomId) return
+    const ease = () => {
+      const cur = this.camera.zoom
+      const diff = this._targetZoom - cur
+      if (Math.abs(diff) < 0.002) {
+        this.camera.setZoom(this._targetZoom)
+        this.onUpdate()
+        this._zoomId = null
+        return
+      }
+      // Eksponentiell innfasing → starter raskt, bremser mykt mot målet
+      this.camera.setZoom(cur + diff * 0.12)
+      this.onUpdate()
+      this._zoomId = requestAnimationFrame(ease)
+    }
+    this._zoomId = requestAnimationFrame(ease)
+  }
+
   _globeDegPerPixel() {
-    const dist = globeCameraDistance(this.camera.zoom)
-    const f = 1 / Math.tan(FOV / 2)
     const h = this.el.clientHeight || 600
+    const dist = globeCameraDistance(this.camera.zoom, h)
+    const f = 1 / Math.tan(FOV / 2)
     const globeScreenRadius = (h / 2) * (f / dist)
     return (1 / globeScreenRadius) * (180 / Math.PI)
   }
@@ -153,6 +176,7 @@ export class InputHandler {
 
   destroy() {
     if (this._inertiaId) cancelAnimationFrame(this._inertiaId)
+    if (this._zoomId) cancelAnimationFrame(this._zoomId)
     for (const [evt, fn] of Object.entries(this._handlers)) {
       this.el.removeEventListener(evt, fn)
     }

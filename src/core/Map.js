@@ -5,10 +5,12 @@ import { TileLoader } from '../tiles/TileLoader.js'
 import { InputHandler } from '../events/InputHandler.js'
 import { Marker } from '../ui/Marker.js'
 
-const OSM_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
-const GLOBE_THRESHOLD = 3.5
-// Crossfade-sone: under FADE_START = ren globe, over FADE_END = rent kart
-const FADE_START = 2.8
+// Mørkt standardkart (CARTO dark, gratis, ingen nøkkel) – Mapbox-aktig mørk globe
+const DARK_URL = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+const GLOBE_THRESHOLD = 3.9
+// Crossfade-sone: smal og lagt der globe- og kartskala matcher, så overgangen
+// blir en sømløs utflating i stedet for to bilder oppå hverandre.
+const FADE_START = 3.6
 const FADE_END = 4.2
 
 export class Map {
@@ -31,7 +33,7 @@ export class Map {
       maxZoom: options.maxZoom ?? 19
     })
 
-    this._tileLoader = new TileLoader(options.tileUrl || OSM_URL)
+    this._tileLoader = new TileLoader(options.tileUrl || DARK_URL)
 
     this._globeRenderer = new GlobeRenderer(this._globeCanvas, this._camera, this._tileLoader)
     this._mapRenderer = new Renderer(this._mapCanvas, this._camera, this._tileLoader)
