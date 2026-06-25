@@ -1,7 +1,7 @@
 import { lngLatToWorld, pixelToWorld, worldToLngLat } from '../geo/mercator.js'
+import { globeCameraDistance, GLOBE_FOV as FOV } from '../geo/globe.js'
 
 const GLOBE_THRESHOLD = 3.5
-const FOV = 40 * Math.PI / 180
 
 export class InputHandler {
   constructor(el, camera, onUpdate) {
@@ -126,7 +126,7 @@ export class InputHandler {
   }
 
   _globeDegPerPixel() {
-    const dist = 1.12 + 2.2 * Math.exp(-0.65 * this.camera.zoom)
+    const dist = globeCameraDistance(this.camera.zoom)
     const f = 1 / Math.tan(FOV / 2)
     const h = this.el.clientHeight || 600
     const globeScreenRadius = (h / 2) * (f / dist)

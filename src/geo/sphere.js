@@ -2,7 +2,9 @@ export function createSphere(latSegs = 64, lngSegs = 128) {
   const positions = []
   const uvs = []
   const indices = []
+  const ring = lngSegs + 1
 
+  // Hoved-rader: Mercator-breddegrader fra +85° (v=0) til -85° (v=1)
   for (let lat = 0; lat <= latSegs; lat++) {
     const v = lat / latSegs
     // Invert Mercator: uniform distribution in tile-space → correct lat
@@ -20,10 +22,30 @@ export function createSphere(latSegs = 64, lngSegs = 128) {
 
   for (let lat = 0; lat < latSegs; lat++) {
     for (let lng = 0; lng < lngSegs; lng++) {
-      const a = lat * (lngSegs + 1) + lng
-      const b = a + lngSegs + 1
+      const a = lat * ring + lng
+      const b = a + ring
       indices.push(a, b, a + 1, b, b + 1, a + 1)
     }
+  }
+
+  // Polkapper: Mercator dekker bare ±85°, så vi lukker hullene mot ±90°.
+  // Kappene strekker øverste/nederste teksturrad ut til selve polen.
+  const northRing = 0
+  const northPole = positions.length / 3
+  positions.push(0, 1, 0)
+  uvs.push(0.5, 0)
+  for (let lng = 0; lng < lngSegs; lng++) {
+    const a = northRing + lng
+    indices.push(northPole, a, a + 1)
+  }
+
+  const southRing = latSegs * ring
+  const southPole = positions.length / 3
+  positions.push(0, -1, 0)
+  uvs.push(0.5, 1)
+  for (let lng = 0; lng < lngSegs; lng++) {
+    const a = southRing + lng
+    indices.push(southPole, a + 1, a)
   }
 
   return {

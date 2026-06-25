@@ -7,6 +7,9 @@ import { Marker } from '../ui/Marker.js'
 
 const OSM_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 const GLOBE_THRESHOLD = 3.5
+// Crossfade-sone: under FADE_START = ren globe, over FADE_END = rent kart
+const FADE_START = 2.8
+const FADE_END = 4.2
 
 export class Map {
   constructor(container, options = {}) {
@@ -52,13 +55,25 @@ export class Map {
   }
 
   _updateMode() {
-    const globe = this._isGlobeMode()
-    this._globeCanvas.style.opacity = globe ? '1' : '0'
-    this._globeCanvas.style.pointerEvents = globe ? 'auto' : 'none'
-    this._mapCanvas.style.opacity = globe ? '0' : '1'
-    this._mapCanvas.style.pointerEvents = globe ? 'none' : 'auto'
-    this._globeRenderer.markDirty()
+    const z = this._camera.zoom
+    // Myk crossfade: kartet toner inn over globen i overgangssonen
+    let mapOpacity
+    if (z <= FADE_START) mapOpacity = 0
+    else if (z >= FADE_END) mapOpacity = 1
+    else mapOpacity = (z - FADE_START) / (FADE_END - FADE_START)
+
+    this._mapCanvas.style.opacity = String(mapOpacity)
+    this._globeCanvas.style.opacity = '1'
+
+    // Input styres av container; her bestemmer vi bare hvilket lag som "eier" cursoren
+    const mapDominant = z >= GLOBE_THRESHOLD
+    this._mapCanvas.style.pointerEvents = mapDominant ? 'auto' : 'none'
+    this._globeCanvas.style.pointerEvents = mapDominant ? 'none' : 'auto'
+
+    // Render kun det som faktisk er synlig (spar GPU)
+    this._globeRenderer.setActive(mapOpacity < 1)
     this._mapRenderer.markDirty()
+    if (mapOpacity < 1) this._globeRenderer.markDirty()
   }
 
   _onUpdate() {

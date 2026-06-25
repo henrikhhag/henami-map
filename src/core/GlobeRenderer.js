@@ -1,5 +1,6 @@
 import { createSphere } from '../geo/sphere.js'
 import { perspective, rotateX, rotateY, translate, multiply } from '../geo/mat4.js'
+import { globeCameraDistance, GLOBE_FOV } from '../geo/globe.js'
 import { TileStitcher } from '../tiles/TileStitcher.js'
 
 // ── Globe ────────────────────────────────────────────────────────────────────
@@ -25,9 +26,11 @@ varying vec2 v_uv;
 varying vec3 v_eye_normal;
 void main() {
   vec4 color = texture2D(u_tex, v_uv);
-  vec3 light = normalize(vec3(0.6, 0.4, 1.0));
-  float diffuse = max(0.22, dot(normalize(v_eye_normal), light));
-  gl_FragColor = vec4(color.rgb * diffuse, color.a);
+  // Lys fra kameraretningen: den synlige halvkulen er jevnt opplyst,
+  // med en svak limb-mørkning mot kanten (gir 3D-følelse uten å bli mørk).
+  float facing = max(0.0, dot(normalize(v_eye_normal), vec3(0.0, 0.0, 1.0)));
+  float lit = 0.82 + 0.18 * facing;
+  gl_FragColor = vec4(color.rgb * lit, 1.0);
 }
 `
 
@@ -39,7 +42,8 @@ uniform mat4 u_mvp;
 uniform mat4 u_mv;
 varying float v_rim;
 void main() {
-  gl_Position = u_mvp * vec4(a_pos * 1.055, 1.0);
+  // Tynt skall like utenfor globen
+  gl_Position = u_mvp * vec4(a_pos * 1.035, 1.0);
   vec3 eye = normalize(mat3(u_mv) * a_pos);
   v_rim = 1.0 - abs(eye.z);
 }
@@ -49,11 +53,10 @@ const ATMO_FRAG = `
 precision mediump float;
 varying float v_rim;
 void main() {
-  float inner = pow(v_rim, 2.0) * 0.6;
-  float outer = pow(v_rim, 5.0) * 0.95;
-  float a = inner + outer;
-  vec3 color = mix(vec3(0.4, 0.65, 1.0), vec3(0.15, 0.45, 1.0), outer);
-  gl_FragColor = vec4(color, a);
+  // Høy potens → glødet konsentreres ved selve kanten (tynn halo, ikke vask)
+  float glow = pow(v_rim, 3.5);
+  vec3 color = mix(vec3(0.35, 0.55, 0.95), vec3(0.55, 0.75, 1.0), glow);
+  gl_FragColor = vec4(color * glow, glow);
 }
 `
 
@@ -131,12 +134,22 @@ export class GlobeRenderer {
     this.camera = camera
     this.stitcher = new TileStitcher(tileLoader)
     this._dirty = true
+    this._active = true
     this._rafId = null
     this._texture = null
 
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
+    const opts = { antialias: true, alpha: true, premultipliedAlpha: false }
+    const gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts)
     if (!gl) throw new Error('WebGL ikke støttet')
     this.gl = gl
+
+    // Anisotropisk filtrering gjør tiles skarpe på skrå (globekanten)
+    this._aniso = gl.getExtension('EXT_texture_filter_anisotropic')
+      || gl.getExtension('WEBKIT_EXT_texture_filter_anisotropic')
+    this._maxAniso = this._aniso
+      ? gl.getParameter(this._aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)
+      : 1
+    this._maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE)
 
     this._setupGlobe()
     this._setupAtmo()
@@ -224,6 +237,10 @@ export class GlobeRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    if (this._aniso) {
+      gl.texParameterf(gl.TEXTURE_2D, this._aniso.TEXTURE_MAX_ANISOTROPY_EXT,
+        Math.min(8, this._maxAniso))
+    }
     this._texture = tex
     this._dirty = true
   }
@@ -239,10 +256,10 @@ export class GlobeRenderer {
     const { canvas, camera } = this
     const w = canvas.clientWidth || 1
     const h = canvas.clientHeight || 1
-    const dist = 1.12 + 2.2 * Math.exp(-0.65 * camera.zoom)
+    const dist = globeCameraDistance(camera.zoom)
     const lng = camera.center.lng * Math.PI / 180
     const lat = camera.center.lat * Math.PI / 180
-    const proj = perspective(40 * Math.PI / 180, w / h, 0.1, 10)
+    const proj = perspective(GLOBE_FOV, w / h, 0.1, 10)
     const view = translate(0, 0, -dist)
     const model = multiply(rotateX(-lat), rotateY(-lng))
     const mv = multiply(view, model)
@@ -264,6 +281,7 @@ export class GlobeRenderer {
   }
 
   _render() {
+    if (!this._active) return
     this._resize()
     if (!this._dirty) return
     this._dirty = false
@@ -309,11 +327,11 @@ export class GlobeRenderer {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gb.idxBuf)
     gl.drawElements(gl.TRIANGLES, gb.count, gl.UNSIGNED_SHORT, 0)
 
-    // ── Atmosphere (depth test off, alpha blend) ──────────────────────────
+    // ── Atmosphere (depth test off, additiv glød) ─────────────────────────
     gl.disable(gl.DEPTH_TEST)
     gl.disable(gl.CULL_FACE)
     gl.enable(gl.BLEND)
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
     const at = this._atmo
     gl.useProgram(at.prog)
     gl.bindBuffer(gl.ARRAY_BUFFER, gb.posBuf)
@@ -334,4 +352,8 @@ export class GlobeRenderer {
 
   stop() { if (this._rafId) cancelAnimationFrame(this._rafId) }
   markDirty() { this._dirty = true }
+  setActive(on) {
+    if (on && !this._active) this._dirty = true
+    this._active = on
+  }
 }
