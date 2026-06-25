@@ -57,12 +57,29 @@ export class Renderer {
     const renderSize = scale / Math.pow(2, tileZ)
 
     for (const tile of tiles) {
+      const px = Math.round(tile.px), py = Math.round(tile.py), sz = Math.ceil(renderSize)
       const img = tileLoader.get(tile.x, tile.y, tile.z)
       if (img) {
-        ctx.drawImage(img, Math.round(tile.px), Math.round(tile.py), Math.ceil(renderSize), Math.ceil(renderSize))
+        ctx.drawImage(img, px, py, sz, sz)
       } else {
-        ctx.fillStyle = '#e8e8e8'
-        ctx.fillRect(Math.round(tile.px), Math.round(tile.py), Math.ceil(renderSize), Math.ceil(renderSize))
+        // Mørk bunn (aldri hvit flash) ...
+        ctx.fillStyle = '#0c1320'
+        ctx.fillRect(px, py, sz, sz)
+        // ... og vis nærmeste cachede forelder-tile (lavere zoom) som uskarpt fyll
+        let pz = tile.z - 1, px2 = tile.x >> 1, py2 = tile.y >> 1, parent = null
+        while (pz >= 0) {
+          const pimg = tileLoader.get( px2, py2, pz)
+          if (pimg) { parent = { img: pimg, z: pz, x: px2, y: py2 }; break }
+          pz--; px2 >>= 1; py2 >>= 1
+        }
+        if (parent) {
+          const levels = tile.z - parent.z
+          const sw = parent.img.width / Math.pow(2, levels)
+          const sh = parent.img.height / Math.pow(2, levels)
+          const sxp = (tile.x - (parent.x << levels)) * sw
+          const syp = (tile.y - (parent.y << levels)) * sh
+          ctx.drawImage(parent.img, sxp, syp, sw, sh, px, py, sz, sz)
+        }
         tileLoader.load(tile.x, tile.y, tile.z, () => { this._dirty = true })
       }
     }

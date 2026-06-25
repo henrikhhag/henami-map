@@ -8,6 +8,18 @@ import { Marker } from '../ui/Marker.js'
 // Mørkt standardkart (CARTO dark, gratis, ingen nøkkel) – Mapbox-aktig mørk globe.
 // @2x = retina-tiles (512px) → skarpere landetekster, samme antall requests.
 const DARK_URL = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+
+// Bygg tile-URL. Prioritet: eksplisitt tileUrl > Mapbox (med token) > CARTO dark.
+// Mapbox krever en offentlig token (pk...). Standard stil: mapbox/dark-v11.
+function resolveTileUrl(o) {
+  if (o.tileUrl) return o.tileUrl
+  if (o.mapboxToken) {
+    const style = o.mapboxStyle || 'mapbox/dark-v11'
+    return `https://api.mapbox.com/styles/v1/${style}/tiles/256/{z}/{x}/{y}@2x?access_token=${o.mapboxToken}`
+  }
+  return DARK_URL
+}
+
 const GLOBE_THRESHOLD = 3.9
 // Crossfade-sone: smal og lagt der globe- og kartskala matcher, så overgangen
 // blir en sømløs utflating i stedet for to bilder oppå hverandre.
@@ -34,7 +46,7 @@ export class Map {
       maxZoom: options.maxZoom ?? 19
     })
 
-    this._tileLoader = new TileLoader(options.tileUrl || DARK_URL)
+    this._tileLoader = new TileLoader(resolveTileUrl(options))
 
     this._globeRenderer = new GlobeRenderer(this._globeCanvas, this._camera, this._tileLoader)
     this._mapRenderer = new Renderer(this._mapCanvas, this._camera, this._tileLoader)

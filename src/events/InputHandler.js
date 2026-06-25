@@ -74,8 +74,8 @@ export class InputHandler {
       // Skalér med faktisk deltaY (trackpad vs mushjul) men demp kraftig,
       // og tak per event så raske trackpad-events ikke hoper seg opp.
       const base = this._zoomId ? this._targetZoom : this.camera.zoom
-      const raw = -e.deltaY * 0.002
-      const step = Math.max(-0.25, Math.min(0.25, raw))
+      const raw = -e.deltaY * 0.004
+      const step = Math.max(-0.5, Math.min(0.5, raw))
       this._zoomToward(base + step)
     }
 
@@ -200,7 +200,7 @@ export class InputHandler {
         return
       }
       // Eksponentiell innfasing → starter raskt, bremser mykt mot målet
-      this.camera.setZoom(cur + diff * 0.1)
+      this.camera.setZoom(cur + diff * 0.16)
       this._applyZoomAnchor()
       this.onUpdate()
       this._zoomId = requestAnimationFrame(ease)
