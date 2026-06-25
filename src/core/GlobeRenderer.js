@@ -261,7 +261,7 @@ export class GlobeRenderer {
     const lat = camera.center.lat * Math.PI / 180
     const proj = perspective(GLOBE_FOV, w / h, 0.1, 10)
     const view = translate(0, 0, -dist)
-    const model = multiply(rotateX(-lat), rotateY(-lng))
+    const model = multiply(rotateX(-lat), rotateY(lng + Math.PI / 2))
     const mv = multiply(view, model)
     const mvp = multiply(proj, mv)
     return { mvp, mv }
