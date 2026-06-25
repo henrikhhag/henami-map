@@ -239,7 +239,7 @@ export class GlobeRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     if (this._aniso) {
       gl.texParameterf(gl.TEXTURE_2D, this._aniso.TEXTURE_MAX_ANISOTROPY_EXT,
-        Math.min(8, this._maxAniso))
+        Math.min(4, this._maxAniso))
     }
     this._texture = tex
     this._dirty = true
@@ -327,7 +327,7 @@ export class GlobeRenderer {
 
   _resize() {
     const { canvas, gl } = this
-    const dpr = window.devicePixelRatio || 1
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
     const w = Math.round(canvas.clientWidth * dpr)
     const h = Math.round(canvas.clientHeight * dpr)
     if (canvas.width !== w || canvas.height !== h) {

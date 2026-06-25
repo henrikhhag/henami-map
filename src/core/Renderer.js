@@ -12,10 +12,16 @@ export class Renderer {
     this._markers = []
     this._rafId = null
     this._dirty = true
+    this._active = true
   }
 
   markDirty() {
     this._dirty = true
+  }
+
+  setActive(on) {
+    if (on && !this._active) this._dirty = true
+    this._active = on
   }
 
   addMarker(marker) {
@@ -28,7 +34,7 @@ export class Renderer {
 
   _resize() {
     const { canvas } = this
-    const dpr = window.devicePixelRatio || 1
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
     const w = canvas.clientWidth
     const h = canvas.clientHeight
     if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
@@ -40,6 +46,7 @@ export class Renderer {
   }
 
   _render() {
+    if (!this._active) return
     this._resize()
     if (!this._dirty) return
     this._dirty = false

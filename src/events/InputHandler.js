@@ -18,6 +18,7 @@ export class InputHandler {
     this._inertiaId = null
     this._targetZoom = camera.zoom
     this._zoomId = null
+    this._pinching = false
     this._handlers = {}
     this._attach()
   }
@@ -81,8 +82,17 @@ export class InputHandler {
 
     this._handlers.touchstart = (e) => {
       if (this._inertiaId) { cancelAnimationFrame(this._inertiaId); this._inertiaId = null }
-      if (e.touches.length === 1) {
+      if (e.touches.length === 2) {
+        // Pinch-start: lås zoom-referanse og forankre midtpunktet mellom fingrene
+        this._dragging = false
+        this._pinching = true
+        this._pinchStartDist = this._touchDist(e.touches)
+        this._pinchStartZoom = this.camera.zoom
+        const mid = this._touchMid(e.touches)
+        this._captureZoomAnchor({ clientX: mid.x, clientY: mid.y })
+      } else if (e.touches.length === 1) {
         this._dragging = true
+        this._pinching = false
         this._lastX = e.touches[0].clientX
         this._lastY = e.touches[0].clientY
         this._velX = this._velY = 0
@@ -92,7 +102,14 @@ export class InputHandler {
 
     this._handlers.touchmove = (e) => {
       e.preventDefault()
-      if (e.touches.length === 1 && this._dragging) {
+      if (e.touches.length === 2 && this._pinching) {
+        // Pinch-zoom: forhold mellom fingeravstand → zoom-endring, hold midtpunkt fast
+        const d = this._touchDist(e.touches)
+        const dz = Math.log2(d / this._pinchStartDist)
+        this.camera.setZoom(this._pinchStartZoom + dz)
+        this._applyZoomAnchor()
+        this.onUpdate()
+      } else if (e.touches.length === 1 && this._dragging) {
         const dx = e.touches[0].clientX - this._lastX
         const dy = e.touches[0].clientY - this._lastY
         const now = performance.now()
@@ -106,7 +123,8 @@ export class InputHandler {
       }
     }
 
-    this._handlers.touchend = () => {
+    this._handlers.touchend = (e) => {
+      if (e.touches && e.touches.length < 2) this._pinching = false
       this._dragging = false
       this._startInertia()
     }
@@ -131,6 +149,14 @@ export class InputHandler {
       this._inertiaId = requestAnimationFrame(step)
     }
     this._inertiaId = requestAnimationFrame(step)
+  }
+
+  _touchDist(touches) {
+    return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
+  }
+
+  _touchMid(touches) {
+    return { x: (touches[0].clientX + touches[1].clientX) / 2, y: (touches[0].clientY + touches[1].clientY) / 2 }
   }
 
   // Roter globen som ved en drag på (dx, dy) piksler – delt av pan og zoom-anker.
@@ -200,7 +226,7 @@ export class InputHandler {
         return
       }
       // Eksponentiell innfasing → starter raskt, bremser mykt mot målet
-      this.camera.setZoom(cur + diff * 0.16)
+      this.camera.setZoom(cur + diff * 0.22)
       this._applyZoomAnchor()
       this.onUpdate()
       this._zoomId = requestAnimationFrame(ease)

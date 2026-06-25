@@ -54,10 +54,12 @@
   <script type="module">
     import { Map } from '../src/index.js'
 
-    // Valgfri Mapbox-token: ?mapbox=pk... i URL, eller localStorage('mapbox_token').
-    // Uten token brukes CARTO dark (gratis). Tokenen committes aldri.
+    // Valgfri Mapbox-token: VITE_MAPBOX_TOKEN (.env.local), ?mapbox=pk... i URL,
+    // eller localStorage('mapbox_token'). Uten token brukes CARTO dark (gratis).
+    // .env.local committes aldri → repo-demoen forblir gratis/token-fri.
     const mapboxToken = new URLSearchParams(location.search).get('mapbox')
-      || localStorage.getItem('mapbox_token') || ''
+      || localStorage.getItem('mapbox_token')
+      || import.meta.env.VITE_MAPBOX_TOKEN || ''
 
     const map = new Map('map', {
       center: { lng: 15, lat: 25 },

@@ -20,11 +20,11 @@ function resolveTileUrl(o) {
   return DARK_URL
 }
 
-const GLOBE_THRESHOLD = 3.9
+const GLOBE_THRESHOLD = 4.0
 // Crossfade-sone: smal og lagt der globe- og kartskala matcher, så overgangen
 // blir en sømløs utflating i stedet for to bilder oppå hverandre.
-const FADE_START = 3.6
-const FADE_END = 4.2
+const FADE_START = 3.85
+const FADE_END = 4.15
 
 export class Map {
   constructor(container, options = {}) {
@@ -71,11 +71,15 @@ export class Map {
 
   _updateMode() {
     const z = this._camera.zoom
-    // Myk crossfade: kartet toner inn over globen i overgangssonen
+    // Myk crossfade: kartet toner inn over globen i overgangssonen.
+    // Smoothstep gir mykere start/slutt enn lineær → mindre «hopp».
     let mapOpacity
     if (z <= FADE_START) mapOpacity = 0
     else if (z >= FADE_END) mapOpacity = 1
-    else mapOpacity = (z - FADE_START) / (FADE_END - FADE_START)
+    else {
+      const t = (z - FADE_START) / (FADE_END - FADE_START)
+      mapOpacity = t * t * (3 - 2 * t)
+    }
 
     this._mapCanvas.style.opacity = String(mapOpacity)
     this._globeCanvas.style.opacity = '1'
@@ -85,10 +89,14 @@ export class Map {
     this._mapCanvas.style.pointerEvents = mapDominant ? 'auto' : 'none'
     this._globeCanvas.style.pointerEvents = mapDominant ? 'none' : 'auto'
 
-    // Render kun det som faktisk er synlig (spar GPU)
-    this._globeRenderer.setActive(mapOpacity < 1)
-    this._mapRenderer.markDirty()
-    if (mapOpacity < 1) this._globeRenderer.markDirty()
+    // Render kun det som faktisk er synlig. Det skjulte laget settes inaktivt,
+    // så det ikke re-rendrer/laster tiles i bakgrunnen (stor ytelsesgevinst).
+    const globeVisible = mapOpacity < 1
+    const mapVisible = mapOpacity > 0
+    this._globeRenderer.setActive(globeVisible)
+    this._mapRenderer.setActive(mapVisible)
+    if (globeVisible) this._globeRenderer.markDirty()
+    if (mapVisible) this._mapRenderer.markDirty()
   }
 
   _onUpdate() {
