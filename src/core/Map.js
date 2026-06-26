@@ -1,5 +1,4 @@
 import { Camera } from './Camera.js'
-import { Renderer } from './Renderer.js'
 import { GlobeRenderer } from './GlobeRenderer.js'
 import { TileLoader } from '../tiles/TileLoader.js'
 import { InputHandler } from '../events/InputHandler.js'
@@ -10,7 +9,6 @@ import { Marker } from '../ui/Marker.js'
 const DARK_URL = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
 
 // Bygg tile-URL. Prioritet: eksplisitt tileUrl > Mapbox (med token) > CARTO dark.
-// Mapbox krever en offentlig token (pk...). Standard stil: mapbox/dark-v11.
 function resolveTileUrl(o) {
   if (o.tileUrl) return o.tileUrl
   if (o.mapboxToken) {
@@ -20,12 +18,6 @@ function resolveTileUrl(o) {
   return DARK_URL
 }
 
-const GLOBE_THRESHOLD = 4.0
-// Crossfade-sone: smal og lagt der globe- og kartskala matcher, så overgangen
-// blir en sømløs utflating i stedet for to bilder oppå hverandre.
-const FADE_START = 3.85
-const FADE_END = 4.15
-
 export class Map {
   constructor(container, options = {}) {
     const el = typeof container === 'string' ? document.getElementById(container) : container
@@ -34,10 +26,13 @@ export class Map {
     el.style.position = 'relative'
     el.style.overflow = 'hidden'
 
+    // WebGL-globe nederst, lett 2D-overlay for markører øverst.
     this._globeCanvas = this._makeCanvas()
-    this._mapCanvas = this._makeCanvas()
+    this._overlay = this._makeCanvas()
+    this._overlay.style.pointerEvents = 'none'
     el.appendChild(this._globeCanvas)
-    el.appendChild(this._mapCanvas)
+    el.appendChild(this._overlay)
+    this._octx = this._overlay.getContext('2d')
 
     this._camera = new Camera({
       center: options.center || { lng: 10.75, lat: 59.91 },
@@ -47,16 +42,13 @@ export class Map {
     })
 
     this._tileLoader = new TileLoader(resolveTileUrl(options))
-
     this._globeRenderer = new GlobeRenderer(this._globeCanvas, this._camera, this._tileLoader)
-    this._mapRenderer = new Renderer(this._mapCanvas, this._camera, this._tileLoader)
-
     this._input = new InputHandler(el, this._camera, () => this._onUpdate(), this._globeRenderer)
     this._events = {}
+    this._markers = []
 
-    this._updateMode()
     this._globeRenderer.start()
-    this._mapRenderer.start()
+    this._drawMarkers()
   }
 
   _makeCanvas() {
@@ -65,74 +57,46 @@ export class Map {
     return c
   }
 
-  _isGlobeMode() {
-    return this._camera.zoom < GLOBE_THRESHOLD
-  }
-
-  _updateMode() {
-    const z = this._camera.zoom
-    // Myk crossfade: kartet toner inn over globen i overgangssonen.
-    // Smoothstep gir mykere start/slutt enn lineær → mindre «hopp».
-    let mapOpacity
-    if (z <= FADE_START) mapOpacity = 0
-    else if (z >= FADE_END) mapOpacity = 1
-    else {
-      const t = (z - FADE_START) / (FADE_END - FADE_START)
-      mapOpacity = t * t * (3 - 2 * t)
-    }
-
-    this._mapCanvas.style.opacity = String(mapOpacity)
-    this._globeCanvas.style.opacity = '1'
-
-    // Input styres av container; her bestemmer vi bare hvilket lag som "eier" cursoren
-    const mapDominant = z >= GLOBE_THRESHOLD
-    this._mapCanvas.style.pointerEvents = mapDominant ? 'auto' : 'none'
-    this._globeCanvas.style.pointerEvents = mapDominant ? 'none' : 'auto'
-
-    // Render kun det som faktisk er synlig. Det skjulte laget settes inaktivt,
-    // så det ikke re-rendrer/laster tiles i bakgrunnen (stor ytelsesgevinst).
-    const globeVisible = mapOpacity < 1
-    const mapVisible = mapOpacity > 0
-    this._globeRenderer.setActive(globeVisible)
-    this._mapRenderer.setActive(mapVisible)
-    if (globeVisible) this._globeRenderer.markDirty()
-    if (mapVisible) this._mapRenderer.markDirty()
-  }
-
   _onUpdate() {
-    this._updateMode()
+    this._globeRenderer.markDirty()
+    this._drawMarkers()
+  }
+
+  // Tegn markørene på overlayet, projisert via globens kamera (skjul de på baksiden).
+  _drawMarkers() {
+    const o = this._overlay, ctx = this._octx
+    if (!ctx) return
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    const w = o.clientWidth, h = o.clientHeight
+    if (o.width !== Math.round(w * dpr) || o.height !== Math.round(h * dpr)) {
+      o.width = Math.round(w * dpr)
+      o.height = Math.round(h * dpr)
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    for (const m of this._markers) {
+      const p = this._globeRenderer.projectLngLat(m.lng, m.lat)
+      if (p && p.front) m.draw(ctx, p.x, p.y)
+    }
   }
 
   getCenter() { return { ...this._camera.center } }
   getZoom() { return this._camera.zoom }
 
-  setCenter(lng, lat) {
-    this._camera.setCenter(lng, lat)
-    this._onUpdate()
-    return this
-  }
-
-  setZoom(z) {
-    this._camera.setZoom(z)
-    this._onUpdate()
-    return this
-  }
-
-  flyTo(options, duration) {
-    this._camera.flyTo(options, duration, () => this._onUpdate())
-    return this
-  }
+  setCenter(lng, lat) { this._camera.setCenter(lng, lat); this._onUpdate(); return this }
+  setZoom(z) { this._camera.setZoom(z); this._onUpdate(); return this }
+  flyTo(options, duration) { this._camera.flyTo(options, duration, () => this._onUpdate()); return this }
 
   addMarker(options) {
     const marker = new Marker(options)
-    this._mapRenderer.addMarker(marker)
-    this._mapRenderer.markDirty()
+    this._markers.push(marker)
+    this._drawMarkers()
     return marker
   }
 
   removeMarker(marker) {
-    this._mapRenderer.removeMarker(marker)
-    this._mapRenderer.markDirty()
+    this._markers = this._markers.filter(m => m !== marker)
+    this._drawMarkers()
     return this
   }
 
@@ -150,9 +114,8 @@ export class Map {
 
   destroy() {
     this._globeRenderer.stop()
-    this._mapRenderer.stop()
     this._input.destroy()
     this._globeCanvas.remove()
-    this._mapCanvas.remove()
+    this._overlay.remove()
   }
 }

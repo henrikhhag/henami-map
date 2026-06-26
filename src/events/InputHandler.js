@@ -1,7 +1,4 @@
-import { lngLatToWorld, pixelToWorld, worldToLngLat } from '../geo/mercator.js'
-import { globeCameraDistance, GLOBE_FOV as FOV } from '../geo/globe.js'
-
-const GLOBE_THRESHOLD = 3.5
+import { globeView } from '../geo/globe.js'
 
 export class InputHandler {
   constructor(el, camera, onUpdate, globeRenderer) {
@@ -168,47 +165,26 @@ export class InputHandler {
     c.lng = ((c.lng + 180) % 360 + 360) % 360 - 180
   }
 
-  // Fang stedet under cursoren så vi kan holde det fast under zoom (som Mapbox).
-  // Globe: geografisk punkt via raycast. Kart: verdenspunkt i mercator.
+  // Fang det geografiske punktet under cursoren (raycast) så vi holder det fast
+  // under zoom (som Mapbox). Alltid globe-modus nå.
   _captureZoomAnchor(e) {
-    // Behold ankeret under en pågående zoom-gest (unngår dyrt re-søk på globen)
+    // Behold ankeret under en pågående zoom-gest (unngår dyrt re-søk)
     if (this._zoomId && this._zoomAnchor) return
     const rect = this.el.getBoundingClientRect()
     const px = e.clientX - rect.left
     const py = e.clientY - rect.top
-    if (this.camera.zoom < GLOBE_THRESHOLD) {
-      const ll = this.globe ? this.globe.unprojectToLngLat(px, py) : null
-      this._zoomAnchor = ll ? { px, py, globe: ll } : null
-    } else {
-      const w = this.el.clientWidth
-      const h = this.el.clientHeight
-      const cw = lngLatToWorld(this.camera.center.lng, this.camera.center.lat)
-      const world = pixelToWorld(px, py, this.camera.zoom, w, h, cw)
-      this._zoomAnchor = { px, py, world }
-    }
+    const ll = this.globe ? this.globe.unprojectToLngLat(px, py) : null
+    this._zoomAnchor = ll ? { px, py, globe: ll } : null
   }
 
-  // Hold det forankrede punktet under cursoren etter at zoom har endret seg.
+  // Nudge globen så det forankrede punktet projiserer tilbake til cursoren.
   _applyZoomAnchor() {
     const a = this._zoomAnchor
-    if (!a) return
-    if (this.camera.zoom < GLOBE_THRESHOLD) {
-      if (!a.globe || !this.globe) return
-      // Nudge globen så ankerpunktet projiserer tilbake til cursoren (2 iter.)
-      for (let i = 0; i < 2; i++) {
-        const p = this.globe.projectLngLat(a.globe.lng, a.globe.lat)
-        if (!p) break
-        this._rotateGlobe(a.px - p.x, a.py - p.y)
-      }
-    } else {
-      if (!a.world) return
-      const w = this.el.clientWidth
-      const h = this.el.clientHeight
-      const scale = Math.pow(2, this.camera.zoom) * 256
-      const cx = a.world.x - (a.px - w / 2) / scale
-      const cy = a.world.y - (a.py - h / 2) / scale
-      const { lng, lat } = worldToLngLat(cx, cy)
-      this.camera.setCenter(lng, Math.max(-85, Math.min(85, lat)))
+    if (!a || !a.globe || !this.globe) return
+    for (let i = 0; i < 2; i++) {
+      const p = this.globe.projectLngLat(a.globe.lng, a.globe.lat)
+      if (!p) break
+      this._rotateGlobe(a.px - p.x, a.py - p.y)
     }
   }
 
@@ -236,24 +212,14 @@ export class InputHandler {
 
   _globeDegPerPixel() {
     const h = this.el.clientHeight || 600
-    const dist = globeCameraDistance(this.camera.zoom, h)
-    const f = 1 / Math.tan(FOV / 2)
+    const { dist, fov } = globeView(this.camera.zoom, h)
+    const f = 1 / Math.tan(fov / 2)
     const globeScreenRadius = (h / 2) * (f / dist)
     return (1 / globeScreenRadius) * (180 / Math.PI)
   }
 
   _pan(dx, dy) {
-    const { camera, el } = this
-    if (camera.zoom < GLOBE_THRESHOLD) {
-      this._rotateGlobe(dx, dy)
-    } else {
-      const w = el.clientWidth
-      const h = el.clientHeight
-      const centerWorld = lngLatToWorld(camera.center.lng, camera.center.lat)
-      const newWorld = pixelToWorld(w / 2 - dx, h / 2 - dy, camera.zoom, w, h, centerWorld)
-      const { lng, lat } = worldToLngLat(newWorld.x, newWorld.y)
-      camera.setCenter(lng, lat)
-    }
+    this._rotateGlobe(dx, dy)
     this.onUpdate()
   }
 

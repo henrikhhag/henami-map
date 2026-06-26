@@ -101,10 +101,10 @@ Please follow the [OSM tile usage policy](https://operations.osmfoundation.org/p
 ## Roadmap
 
 - [x] Phase 1 — Raster tiles, pan/zoom, markers, flyTo
-- [ ] Phase 2 — Vector tile parsing (PBF/protobuf), WebGL renderer
-- [ ] Phase 3 — Style spec (JSON layers), line/polygon drawing
+- [x] Phase 2 — WebGL globe + seamless globe↔mercator projection morph, dark theme, retina tiles, pinch-zoom
+- [ ] Phase 3 — Vector tile parsing (PBF/protobuf), style spec, line/polygon drawing
 - [ ] Phase 4 — React wrapper (`<HenamiMap />`)
-- [ ] Phase 5 — Custom themes / dark mode tiles
+- [ ] Phase 5 — 3D terrain (terrain-RGB), custom light theme
 
 ## License
 

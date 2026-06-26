@@ -20,8 +20,34 @@ function softMin(a, b, k = 12) {
   return -Math.log(Math.exp(-k * a) + Math.exp(-k * b)) / k
 }
 
-// Globens kameraavstand. Ved lav zoom rammer vi inn hele kloden; idet vi
-// nærmer oss kart-overgangen tar skala-matchen over så kartet aligner.
+const DIST_MIN = 1.12 // kameraet kommer aldri nærmere enn dette (alltid utenfor kula)
+
+// Kamera-oppsett for globen: avstand + FOV. Ved lav zoom flyttes kameraet nærmere
+// for å zoome; når det når DIST_MIN holdes avstanden, og videre zoom skjer ved å
+// snevre inn FOV. Slik forblir det ALLTID en globe (kamera utenfor), skarpt på
+// alle nivåer, uten utflating til 2D.
+export function globeView(zoom, viewportH = 800) {
+  let dist = softMin(framingDistance(zoom), scaleMatchDistance(zoom, viewportH))
+  let fov = GLOBE_FOV
+  if (dist < DIST_MIN) {
+    const ratio = dist / DIST_MIN
+    dist = DIST_MIN
+    fov = 2 * Math.atan(Math.tan(GLOBE_FOV / 2) * ratio)
+  }
+  return { dist, fov }
+}
+
 export function globeCameraDistance(zoom, viewportH = 800) {
-  return softMin(framingDistance(zoom), scaleMatchDistance(zoom, viewportH))
+  return globeView(zoom, viewportH).dist
+}
+
+// Morph-faktor 0→1: kula flater ut til mercator-plan idet vi zoomer inn mot
+// kart-overgangen. Ved 1.0 er geometrien identisk med 2D-rendereren.
+// Lagt LANGT inn slik at det forblir en globe gjennom vanlig bruk (som Mapbox);
+// utflatingen skjer først når du er godt innzoomet (og kula uansett er nær flat).
+export const MORPH_START = 4.4
+export const MORPH_END = 5.4
+export function globeMorph(zoom) {
+  const t = Math.max(0, Math.min(1, (zoom - MORPH_START) / (MORPH_END - MORPH_START)))
+  return t * t * (3 - 2 * t) // smoothstep
 }
