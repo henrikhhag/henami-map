@@ -21,16 +21,18 @@ function softMin(a, b, k = 12) {
 }
 
 const DIST_MIN = 1.12 // kameraet kommer aldri nærmere enn dette (alltid utenfor kula)
+const DIST_A = 7.36   // kalibrert: dist ≈ 3.6 ved zoom 1.5 (hele kloden i ramme)
 
-// Kamera-oppsett for globen: avstand + FOV. Ved lav zoom flyttes kameraet nærmere
-// for å zoome; når det når DIST_MIN holdes avstanden, og videre zoom skjer ved å
-// snevre inn FOV. Slik forblir det ALLTID en globe (kamera utenfor), skarpt på
-// alle nivåer, uten utflating til 2D.
-export function globeView(zoom, viewportH = 800) {
-  let dist = softMin(framingDistance(zoom), scaleMatchDistance(zoom, viewportH))
+// Kamera-oppsett for globen: avstand + FOV. dist = 1 + A/2^zoom gir JEVN zoom
+// (skala ∝ 2^zoom). Når kameraet når DIST_MIN holdes avstanden og videre zoom
+// skjer ved å snevre inn FOV – slik forblir det ALLTID en globe (kamera utenfor),
+// skarpt på alle nivåer, uten utflating til 2D.
+export function globeView(zoom) {
+  const want = DIST_A / Math.pow(2, zoom) // ønsket (dist - 1)
+  let dist = 1 + want
   let fov = GLOBE_FOV
   if (dist < DIST_MIN) {
-    const ratio = dist / DIST_MIN
+    const ratio = want / (DIST_MIN - 1)
     dist = DIST_MIN
     fov = 2 * Math.atan(Math.tan(GLOBE_FOV / 2) * ratio)
   }

@@ -161,7 +161,8 @@ export class InputHandler {
     const dpx = this._globeDegPerPixel()
     const c = this.camera.center
     c.lng -= dx * dpx
-    c.lat = Math.max(-85, Math.min(85, c.lat + dy * dpx))
+    // Clamp til ±80° så man ikke kan stirre rett ned polaksen (verste deformasjon)
+    c.lat = Math.max(-80, Math.min(80, c.lat + dy * dpx))
     c.lng = ((c.lng + 180) % 360 + 360) % 360 - 180
   }
 

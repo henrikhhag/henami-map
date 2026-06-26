@@ -21,13 +21,21 @@ export class Camera {
     this.zoom = this.clampZoom(z)
   }
 
-  flyTo({ center, zoom }, duration = 600, onUpdate, onDone) {
+  flyTo({ center, zoom }, duration, onUpdate, onDone) {
     if (this._animFrame) cancelAnimationFrame(this._animFrame)
 
     const startCenter = { ...this.center }
     const startZoom = this.zoom
     const endCenter = center || startCenter
     const endZoom = zoom !== undefined ? this.clampZoom(zoom) : startZoom
+
+    // Auto-varighet: skaler med zoom- og avstandsendring så store hopp ikke
+    // går for fort (og tiles rekker å laste underveis).
+    if (duration == null) {
+      const dz = Math.abs(endZoom - startZoom)
+      const dAng = Math.hypot(endCenter.lng - startCenter.lng, endCenter.lat - startCenter.lat)
+      duration = Math.min(4200, 800 + dz * 380 + dAng * 10)
+    }
     const startTime = performance.now()
 
     const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t

@@ -80,17 +80,18 @@
       modeEl.textContent = 'GLOBE'
     }, 100)
 
+    // Ingen varighet → flyTo auto-beregner (lengre for store hopp)
     document.getElementById('btn-world').onclick = () =>
-      map.flyTo({ center: { lng: 15, lat: 25 }, zoom: 1.5 }, 900)
+      map.flyTo({ center: { lng: 15, lat: 25 }, zoom: 1.5 })
 
     document.getElementById('btn-oslo').onclick = () =>
-      map.flyTo({ center: { lng: 10.75, lat: 59.91 }, zoom: 11 }, 1200)
+      map.flyTo({ center: { lng: 10.75, lat: 59.91 }, zoom: 11 })
 
     document.getElementById('btn-bergen').onclick = () =>
-      map.flyTo({ center: { lng: 5.32, lat: 60.39 }, zoom: 11 }, 1200)
+      map.flyTo({ center: { lng: 5.32, lat: 60.39 }, zoom: 11 })
 
     document.getElementById('btn-new-york').onclick = () =>
-      map.flyTo({ center: { lng: -74.0, lat: 40.71 }, zoom: 11 }, 1200)
+      map.flyTo({ center: { lng: -74.0, lat: 40.71 }, zoom: 11 })
 
     document.getElementById('btn-zoom-in').onclick = () =>
       map.setZoom(map.getZoom() + 1)

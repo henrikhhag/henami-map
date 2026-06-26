@@ -60,8 +60,8 @@ precision mediump float;
 uniform float u_fade;
 varying float v_rim;
 void main() {
-  float glow = pow(v_rim, 3.5) * u_fade;
-  vec3 color = mix(vec3(0.35, 0.55, 0.95), vec3(0.55, 0.75, 1.0), glow);
+  float glow = pow(v_rim, 5.0) * u_fade * 0.55;
+  vec3 color = mix(vec3(0.30, 0.50, 0.90), vec3(0.55, 0.75, 1.0), glow);
   gl_FragColor = vec4(color * glow, glow);
 }
 `
@@ -206,7 +206,7 @@ export class GlobeRenderer {
   _setupAtmo() {
     const gl = this.gl
     const prog = program(gl, ATMO_VERT, ATMO_FRAG)
-    const { positions, indices } = createSphere(32, 64)
+    const { positions, indices } = createSphere(64, 128)
     const posBuf = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuf)
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW)
@@ -266,24 +266,34 @@ export class GlobeRenderer {
     const cached = this._texCache.get(key)
     if (cached !== undefined) return cached            // tex eller null (laster)
     const img = this.tileLoader.get(x, y, z)
-    if (img) { const t = this._makeTex(img); this._texCache.set(key, t); return t }
+    if (img) { const t = this._makeTex(img); this._texCache.set(key, t); this._evict(); return t }
     this._texCache.set(key, null)
     this.tileLoader.load(x, y, z, (loaded) => {
       this._texCache.set(key, this._makeTex(loaded))
+      this._evict()
       this._dirty = true
     })
     return null
   }
 
-  // Egen tekstur, ellers nærmeste lastede forelder (med UV-sub-rect).
+  // Returner tekstur KUN hvis allerede tilgjengelig (utløser ingen ny lasting).
+  _cachedTex(x, y, z) {
+    const key = z + '/' + x + '/' + y
+    const c = this._texCache.get(key)
+    if (c) return c
+    if (c === null) return null
+    const img = this.tileLoader.get(x, y, z)
+    if (img) { const t = this._makeTex(img); this._texCache.set(key, t); this._evict(); return t }
+    return null
+  }
+
+  // Egen tekstur, ellers nærmeste ALLEREDE-lastede forelder (med UV-sub-rect).
+  // Forelder-nivåer utløser IKKE ny lasting (unngår flom som lagger ved dyp zoom).
   _resolveTile(x, y, z) {
     const own = this._loadTile(x, y, z)
     if (own) return { tex: own, scale: 1, offX: 0, offY: 0 }
     for (let k = 1; z - k >= 0; k++) {
-      const ax = x >> k, ay = y >> k, az = z - k
-      const key = az + '/' + ax + '/' + ay
-      let tex = this._texCache.get(key)
-      if (tex === undefined) tex = this._loadTile(ax, ay, az)
+      const tex = this._cachedTex(x >> k, y >> k, z - k)
       if (tex) {
         const m = 1 << k
         return { tex, scale: 1 / m, offX: (x % m) / m, offY: (y % m) / m }
@@ -292,10 +302,31 @@ export class GlobeRenderer {
     return null
   }
 
+  // Bound minnebruk: kast eldste ikke-basis-teksturer (basislaget z≤2 beholdes).
+  _evict() {
+    if (this._texCache.size <= 600) return
+    for (const key of this._texCache.keys()) {
+      if (+key.split('/')[0] <= 2) continue
+      const tex = this._texCache.get(key)
+      if (tex) this.gl.deleteTexture(tex)
+      this._texCache.delete(key)
+      if (this._texCache.size <= 500) break
+    }
+  }
+
   // ── Synlige tiles ────────────────────────────────────────────────────────────
 
   _tileZoom() {
-    return Math.max(0, Math.min(MAX_TILE_Z, Math.round(this.camera.zoom)))
+    // Velg tile-nivå etter FAKTISK vist skala (ikke camera.zoom), ellers blir
+    // tiles undersamplet/blurry. Mål px per grad lengde ved senter via projeksjon.
+    const c = this.camera.center
+    const p0 = this.projectLngLat(c.lng, c.lat)
+    const p1 = this.projectLngLat(c.lng + 1, c.lat)
+    if (!p0 || !p1) return Math.max(0, Math.min(MAX_TILE_Z, Math.round(this.camera.zoom)))
+    const pxPerDegLng = Math.hypot(p1.x - p0.x, p1.y - p0.y)
+    // mercator: én verden (360°) = 2^Z * 256 px. @2x-tiles dekker retina-skarphet.
+    const z = Math.log2(pxPerDegLng * 360 / 256)
+    return Math.max(0, Math.min(MAX_TILE_Z, Math.round(z)))
   }
 
   // Vinkel-radius (rad) av synlig flate i en gitt retning (FOV-halvvinkel beta).
@@ -340,8 +371,11 @@ export class GlobeRenderer {
     for (let ty = tyMin; ty <= tyMax; ty++) {
       // Strekk øverste/nederste rad mot polene (mercator dekker bare ±85°),
       // så polkappene fylles i stedet for å vise et svart hull.
-      const w0y = ty === 0 ? -0.8 : ty / n
-      const w1y = ty === n - 1 ? 1.8 : (ty + 1) / n
+      // Mildt strekk mot polene (mercator dekker bare ±85°). Stort strekk gir
+      // «pinwheel»-vifting ved polen, så vi holder det lite – liten mørk rest
+      // ved selve polen er nær usynlig på mørkt kart.
+      const w0y = ty === 0 ? -0.32 : ty / n
+      const w1y = ty === n - 1 ? 1.32 : (ty + 1) / n
       for (let tx = txMin; tx <= txMax; tx++) {
         const wrapped = ((tx % n) + n) % n
         tiles.push({ x: wrapped, y: ty, z, w0x: tx / n, w0y, w1x: (tx + 1) / n, w1y })
@@ -437,7 +471,9 @@ export class GlobeRenderer {
     const gl = this.gl
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     const { mvp, mv } = this._matrices()
-    const fade = 1 - Math.max(0, Math.min(1, (this.camera.zoom - 3.0) / 2.0)) // atmosfære/stjerner toner ut ved innzoom
+    // Atmosfære/stjerner toner ut idet globen slutter å få plass på skjermen
+    // (~zoom 3.2), så glødet ikke "henger igjen" og følger når man er innzoomet.
+    const fade = Math.max(0, Math.min(1, (3.2 - this.camera.zoom) / 1.4))
 
     // ── Stjerner ────────────────────────────────────────────────────────
     if (fade > 0.01) {
